@@ -322,6 +322,7 @@ function dibujarTempo(t) {
     t.regularidad < 0.7
       ? el("p", { class: "aviso" }, "El pulso es irregular (tempo libre o rubato): tomá el número como aproximado.")
       : null,
+    t.aviso ? el("p", { class: "aviso" }, t.aviso) : null,
     el("p", { class: "tenue" }, textoSegundoMetodo(t.segundo_metodo)),
     curvaDeTempo(t.curva, estado.resultado.archivo.duracion)
   );
@@ -340,11 +341,22 @@ function dibujarCompas(c) {
     anexar(tarjeta, el("p", { class: "grande" }, "—"), insignia("baja"), el("p", {}, c.motivo));
     return;
   }
-  anexar(tarjeta, 
+  const segundo = c.segundo_metodo;
+  let origen;
+  if (c.fuente === "periodicidad") {
+    origen = `Cuenta en ${c.pulsos_por_compas}: la armonía y el bajo se repiten cada ${c.pulsos_por_compas} pulsos (o múltiplos).`;
+  } else {
+    origen = `Cuenta en ${c.pulsos_por_compas}: así cuentan el ${porcentaje(c.acuerdo)} de los ${c.compases_contados} compases detectados.`;
+  }
+  anexar(
+    tarjeta,
     el("p", { class: "grande" }, c.lectura),
     c.alternativa ? el("p", { class: "tenue" }, c.alternativa) : null,
     insignia(c.confianza),
-    el("p", {}, `Cuenta en ${c.pulsos_por_compas}: así cuentan el ${porcentaje(c.acuerdo)} de los ${c.compases_contados} compases detectados.`),
+    el("p", {}, origen),
+    segundo && segundo.confirma
+      ? el("p", { class: "tenue" }, "Un segundo método (cada cuántos pulsos se repite la armonía) confirma el compás.")
+      : null,
     el("p", {}, SUBDIVISION[c.subdivision.tipo]),
     ...c.avisos.map((a) => el("p", { class: "aviso" }, a))
   );
@@ -404,6 +416,9 @@ function nombresDelCompas(compas) {
 function dibujarAcordes() {
   const acordes = estado.resultado.acordes;
   const resumen = estado.detalle === "simple" ? acordes.resumen_simple : acordes.resumen;
+  $("nota-grilla").textContent = estado.resultado.compas.grilla_aproximada
+    ? "Grilla aproximada: no se sabe con seguridad en qué pulso empieza cada compás. Hacé clic en un compás para escucharlo desde ahí."
+    : "Hacé clic en un compás para escucharlo desde ahí.";
   $("nota-acordes").textContent =
     estado.detalle === "simple"
       ? "Modo simple: solo mayor y menor, que es lo más confiable. Pasá a “Completos” para ver séptimas, bajos e inversiones."
@@ -497,7 +512,10 @@ function actualizarReproduccion() {
 
   const p = buscar(estado.pulsos, t, null);
   const cerca = p >= 0 && t - estado.pulsos[p] < 0.25;
-  const numero = cerca ? estado.numeros[p] : null;
+  const porCompas = estado.resultado.compas.pulsos_por_compas;
+  let numero = cerca ? estado.numeros[p] : null;
+  // Si falta un primer tiempo, la cuenta seguiría de largo (8, 9, 10…): mejor no mostrar nada
+  if (numero && porCompas && numero > porCompas + 1) numero = null;
   const cuenta = $("cuenta");
   cuenta.textContent = numero ? String(numero) : "";
   cuenta.classList.toggle("uno", numero === 1);

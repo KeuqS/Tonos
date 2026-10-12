@@ -32,6 +32,8 @@ def _texto(r: dict) -> str:
             lineas.append(f"            probablemente lo sientas a {alt[t['sugerencia']]:.0f} BPM")
         if not t["estable"]:
             lineas.append(f"            el tempo varía entre {t['rango'][0]:.0f} y {t['rango'][1]:.0f} BPM")
+        if t.get("aviso"):
+            lineas.append(f"            {t['aviso']}")
     else:
         lineas.append(f"Tempo:      no determinado ({t.get('motivo')})")
 
@@ -39,8 +41,16 @@ def _texto(r: dict) -> str:
     if c.get("lectura"):
         alt = f" ({c['alternativa']})" if c.get("alternativa") else ""
         lineas.append(f"Compás:     {c['lectura']}{alt}")
-        lineas.append(f"            cuenta en {c['pulsos_por_compas']} en el {c['acuerdo'] * 100:.0f} % de los "
-                      f"compases; subdivisión {c['subdivision']['tipo']}; confianza {c['confianza']}")
+        if c.get("fuente") == "periodicidad":
+            origen = f"la armonía y el bajo se repiten cada {c['pulsos_por_compas']} pulsos"
+        else:
+            origen = f"cuenta en {c['pulsos_por_compas']} en el {c['acuerdo'] * 100:.0f} % de los compases"
+            if (c.get("segundo_metodo") or {}).get("confirma"):
+                origen += " (y la armonía lo confirma)"
+        lineas.append(f"            {origen}; subdivisión {c['subdivision']['tipo']}; confianza {c['confianza']}")
+        for aviso in c.get("avisos", []):
+            if aviso.startswith("El detector") or aviso.startswith("No se pudo determinar"):
+                lineas.append(f"            {aviso}")
     else:
         lineas.append(f"Compás:     no determinado. {c.get('motivo', '')}")
 
