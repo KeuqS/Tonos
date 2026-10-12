@@ -1,0 +1,25 @@
+# PyTorch (versión CPU) se instala aparte desde el índice de PyTorch: ver instalar.ps1.
+# Consonance-ACE se instala aparte con --no-deps (fija versiones viejas de beat-this y wandb
+# que no hacen falta para usar el modelo).
+
+# Pulsos y primeros tiempos
+beat-this==1.1.0
+# Tonalidad (Deezer, ICASSP 2025)
+skey @ git+https://github.com/deezer/s-key@918b83d273568d5041569bb8068843d19a335726
+# Dependencias que Consonance-ACE necesita para inferencia
+librosa==0.11.0
+mir_eval==0.8.2
+harte-library==0.4.5
+jams==0.3.5
+pumpp==0.6.0
+gin-config==0.5.0
+lightning==2.5.1
+music21
+scikit-learn
+soundfile
+# Servidor web local
+fastapi
+uvicorn
+python-multipart
+# Pruebas
+pytest

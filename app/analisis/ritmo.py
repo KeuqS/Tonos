@@ -1,0 +1,276 @@
+"""Pulsos, primeros tiempos, tempo y compás.
+
+- Pulsos y primeros tiempos: Beat This! (CPJKU, ISMIR 2024; MIT).
+- Tempo: se calcula a partir de los pulsos (mediana de los intervalos) y se compara
+  con un segundo método independiente (librosa).
+- Compás: ninguna herramienta abierta lo da directamente. Se cuenta cuántos pulsos hay
+  entre primeros tiempos consecutivos y se mira si cada pulso se divide en 2 o en 3.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from functools import lru_cache
+
+import librosa
+import numpy as np
+
+SALTO = 256  # muestras por cuadro de la envolvente de ataques (~11.6 ms a 22050 Hz)
+
+
+@lru_cache(maxsize=1)
+def _modelo():
+    from beat_this.inference import Audio2Beats
+
+    return Audio2Beats(checkpoint_path="final0", device="cpu", dbn=False)
+
+
+def precargar() -> None:
+    _modelo()
+
+
+def detectar_pulsos(senal: np.ndarray, fs: int) -> tuple[np.ndarray, np.ndarray]:
+    pulsos, primeros = _modelo()(senal, fs)
+    return np.asarray(pulsos, dtype=float), np.asarray(primeros, dtype=float)
+
+
+def envolvente_de_ataques(senal: np.ndarray, fs: int) -> np.ndarray:
+    return librosa.onset.onset_strength(y=senal, sr=fs, hop_length=SALTO)
+
+
+# --- Tempo -------------------------------------------------------------------
+
+
+def _periodo(intervalos: np.ndarray) -> float:
+    """Promedio de los intervalos a ±10 % de la mediana (ignora pulsos salteados o de más)."""
+    mediana = float(np.median(intervalos))
+    validos = intervalos[np.abs(intervalos - mediana) <= 0.10 * mediana]
+    return float(np.mean(validos)) if len(validos) else mediana
+
+
+def analizar_tempo(pulsos: np.ndarray, envolvente: np.ndarray, fs: int) -> dict:
+    if len(pulsos) < 8:
+        return {"bpm": None, "motivo": "Se detectaron muy pocos pulsos para estimar el tempo."}
+
+    intervalos = np.diff(pulsos)
+    mediana = float(np.median(intervalos))
+    # Beat This! entrega los pulsos en una grilla de 20 ms, así que cada intervalo viene
+    # redondeado y la mediana también (170 BPM saldría 166,7). El promedio de los intervalos
+    # válidos no arrastra ese redondeo: los errores de cada pulso se compensan.
+    bpm = 60.0 / _periodo(intervalos)
+
+    # Tempo local: misma cuenta sobre ventanas de 8 intervalos
+    locales = np.array([60.0 / _periodo(intervalos[max(0, i - 4): i + 4]) for i in range(len(intervalos))])
+    p10, p90 = (float(x) for x in np.percentile(locales, [10, 90]))
+    variacion = (p90 - p10) / bpm
+    # Regularidad: proporción de pulsos a ±10 % del intervalo típico
+    regularidad = float(np.mean(np.abs(intervalos - mediana) <= 0.10 * mediana))
+
+    paso = max(1, len(locales) // 150)
+    curva = [[round(float(t), 2), round(float(b), 1)] for t, b in zip(pulsos[1::paso], locales[::paso])]
+
+    # Segundo método independiente (autocorrelación de la envolvente de ataques)
+    bpm_librosa = float(
+        librosa.feature.tempo(onset_envelope=envolvente, sr=fs, hop_length=SALTO)[0]
+    )
+    relacion = None
+    for factor, nombre in ((1, "igual"), (2, "doble"), (0.5, "mitad"), (3, "triple"), (1 / 3, "tercio")):
+        if abs(bpm_librosa - bpm * factor) <= 0.04 * bpm * factor:
+            relacion = nombre
+            break
+
+    # Fuera del rango habitual, lo más probable es que se sienta al doble o a la mitad
+    sugerencia = "doble" if bpm < 55 else "mitad" if bpm > 200 else None
+
+    if regularidad >= 0.85 and relacion in ("igual", "doble", "mitad"):
+        confianza = "alta"
+    elif regularidad >= 0.7:
+        confianza = "media"
+    else:
+        confianza = "baja"
+
+    return {
+        "bpm": round(bpm, 1),
+        "confianza": confianza,
+        "alternativas": {"mitad": round(bpm / 2, 1), "doble": round(bpm * 2, 1)},
+        "sugerencia": sugerencia,
+        "rango": [round(p10, 1), round(p90, 1)],
+        "estable": bool(variacion < 0.08),
+        "regularidad": round(regularidad, 2),
+        "curva": curva,
+        "segundo_metodo": {"bpm": round(bpm_librosa, 1), "relacion": relacion},
+    }
+
+
+# --- Compás ------------------------------------------------------------------
+
+
+def pulsos_por_compas(pulsos: np.ndarray, primeros: np.ndarray) -> list[int]:
+    """Cantidad de pulsos de cada compás completo (entre dos primeros tiempos)."""
+    if len(primeros) < 2:
+        return []
+    indices = np.searchsorted(pulsos, primeros)
+    cuentas = np.diff(indices)
+    return [int(c) for c in cuentas if c > 0]
+
+
+def _valor(envolvente: np.ndarray, t: float, fs: int) -> float:
+    """Máximo de la envolvente en ±2 cuadros (±23 ms) alrededor del instante t."""
+    centro = int(round(t * fs / SALTO))
+    ini, fin = max(0, centro - 2), min(len(envolvente), centro + 3)
+    return float(envolvente[ini:fin].max()) if fin > ini else 0.0
+
+
+def analizar_subdivision(pulsos: np.ndarray, envolvente: np.ndarray, fs: int) -> dict:
+    """¿Cada pulso se divide en 2 (binaria) o en 3 (ternaria)?
+
+    Compara la energía de ataques a 1/2 del pulso contra la de 1/3 y 2/3.
+    Es una pista, no un veredicto: el swing y el shuffle también suenan ternarios.
+    """
+    binaria, ternaria, entre = [], [], []
+    for b0, b1 in zip(pulsos[:-1], pulsos[1:]):
+        d = b1 - b0
+        if not 0.15 < d < 2.0:
+            continue
+        binaria.append(_valor(envolvente, b0 + d / 2, fs))
+        ternaria.append((_valor(envolvente, b0 + d / 3, fs) + _valor(envolvente, b0 + 2 * d / 3, fs)) / 2)
+        # Referencia: puntos que no caen en ninguna de las dos grillas (ni 1/3, 1/2, 2/3, ni 1/4, 3/4)
+        entre.append((_valor(envolvente, b0 + 0.42 * d, fs) + _valor(envolvente, b0 + 0.58 * d, fs)) / 2)
+    if len(binaria) < 8:
+        return {"tipo": "no clara", "razon": None}
+
+    b, t = float(np.median(binaria)), float(np.median(ternaria))
+    fondo = float(np.median(entre)) + 1e-6  # mismo estadístico (máximo en ±2 cuadros) que b y t
+    razon = (t + 1e-6) / (b + 1e-6)
+    if max(b, t) < 1.15 * fondo:
+        tipo = "no clara"
+    elif razon >= 1.25:
+        tipo = "ternaria"
+    elif razon <= 0.80:
+        tipo = "binaria"
+    else:
+        tipo = "no clara"
+    return {"tipo": tipo, "razon": round(razon, 2)}
+
+
+_LECTURAS = {
+    (4, "binaria"): ("4/4", None),
+    (4, "no clara"): ("4/4", None),
+    # (4, "ternaria") depende del tempo: ver _lectura()
+    (2, "binaria"): ("2/4", "o 4/4 contado más rápido"),
+    (2, "no clara"): ("2/4", "o 6/8"),
+    (2, "ternaria"): ("6/8", "o 2/4 con tresillos"),
+    (3, "binaria"): ("3/4", "o 6/8"),
+    (3, "no clara"): ("3/4", "o 6/8"),
+    (3, "ternaria"): ("3/4", "o 9/8, o 6/8"),
+    (6, "binaria"): ("6/8", "o 3/4"),
+    (6, "no clara"): ("6/8", "o 3/4"),
+    (6, "ternaria"): ("6/8", "o 3/4"),
+}
+
+AVISO_TERNARIO = (
+    "El 3/4 y el 6/8 se confunden con mucha facilidad (y en la chacarera o la zamba se "
+    "alternan a propósito). Ninguna herramienta automática los distingue bien: escuchá si "
+    "el pulso que marcás con el pie se divide en 2 o en 3."
+)
+
+
+def _lectura(n: int, subdivision: str, bpm: float | None) -> tuple[str, str | None]:
+    if n == 4 and subdivision == "ternaria":
+        # Rápido con pulso en tres = swing/shuffle (se escribe 4/4); lento = balada en 12/8
+        if bpm is not None and bpm < 80:
+            return "12/8", "o 4/4 con tresillos"
+        return "4/4 con swing", "o shuffle; también se puede escribir en 12/8"
+    if (n, subdivision) in _LECTURAS:
+        return _LECTURAS[(n, subdivision)]
+    if n in (5, 7):
+        return f"{n}/4", f"o {n}/8; compás poco común: tomalo con pinzas"
+    return f"{n} pulsos por compás", "compás poco común: tomalo con pinzas"
+
+
+def _sin_compas(subdivision: dict, motivo: str) -> dict:
+    return {"pulsos_por_compas": None, "lectura": None, "alternativa": None, "confianza": "baja",
+            "motivo": motivo, "subdivision": subdivision, "avisos": []}
+
+
+_NIVELES = ["baja", "media", "alta"]
+
+
+def analizar_compas(pulsos: np.ndarray, primeros: np.ndarray, subdivision: dict,
+                    bpm: float | None = None, confianza_tempo: str | None = None) -> dict:
+    cuentas = pulsos_por_compas(pulsos, primeros)
+    if len(cuentas) < 4:
+        return _sin_compas(subdivision, "No se detectaron suficientes primeros tiempos para estimar el compás.")
+
+    conteo = Counter(cuentas)
+    n, veces = conteo.most_common(1)[0]
+    acuerdo = veces / len(cuentas)
+    if n < 2:
+        return _sin_compas(
+            subdivision,
+            "Casi todos los pulsos detectados quedaron marcados como primer tiempo, así que no se "
+            "pudo contar el compás. Pasa con música muy libre o con mucho rubato.",
+        )
+    lectura, alternativa = _lectura(n, subdivision["tipo"], bpm)
+    if acuerdo >= 0.85:
+        confianza = "alta"
+    elif acuerdo >= 0.6:
+        confianza = "media"
+    else:
+        confianza = "baja"
+    # Si los pulsos mismos son dudosos, el compás (que se cuenta con ellos) no puede ser más seguro
+    if confianza_tempo in _NIVELES:
+        confianza = _NIVELES[min(_NIVELES.index(confianza), _NIVELES.index(confianza_tempo))]
+
+    avisos = []
+    if n in (2, 3, 6):
+        avisos.append(AVISO_TERNARIO)
+    if acuerdo < 0.6:
+        avisos.append(
+            "Los compases detectados no cuentan siempre lo mismo: puede que el compás cambie "
+            "durante la canción o que los primeros tiempos estén mal ubicados."
+        )
+
+    return {
+        "pulsos_por_compas": n,
+        "lectura": lectura,
+        "alternativa": alternativa,
+        "acuerdo": round(acuerdo, 2),
+        "confianza": confianza,
+        "compases_contados": len(cuentas),
+        "distribucion": {str(k): round(v / len(cuentas), 2) for k, v in sorted(conteo.items())},
+        "subdivision": subdivision,
+        "avisos": avisos,
+    }
+
+
+def compases(pulsos: np.ndarray, primeros: np.ndarray, duracion: float) -> list[dict]:
+    """Celdas [inicio, fin) para mostrar los acordes compás por compás.
+
+    - Con primeros tiempos: un compás entre cada par. Lo que suena antes del primero es la
+      anacrusa (si dura menos de un compás) o la intro (compás 0).
+    - Sin primeros tiempos: tramos de 4 pulsos, o de 4 segundos si tampoco hay pulsos, para
+      que los acordes se puedan ver igual.
+    """
+    if len(primeros):
+        bordes = [float(x) for x in primeros]
+        tipo = "compás"
+        largo_tipico = float(np.median(np.diff(primeros))) if len(primeros) > 1 else 2.0
+    elif len(pulsos) >= 4:
+        bordes = [float(x) for x in pulsos[::4]]
+        tipo = "tramo"
+        largo_tipico = 4 * float(np.median(np.diff(pulsos)))
+    else:
+        bordes = [float(x) for x in np.arange(0.0, duracion, 4.0)]
+        tipo = "tramo"
+        largo_tipico = 4.0
+
+    salida = []
+    if bordes and bordes[0] > 0.3:
+        etiqueta = "anacrusa" if tipo == "compás" and bordes[0] < 1.05 * largo_tipico else "intro"
+        salida.append({"numero": 0, "etiqueta": etiqueta, "inicio": 0.0, "fin": bordes[0]})
+    bordes.append(duracion)
+    for i, (ini, fin) in enumerate(zip(bordes[:-1], bordes[1:]), start=1):
+        if fin - ini > 0.05:
+            salida.append({"numero": i, "etiqueta": f"{tipo} {i}", "inicio": ini, "fin": fin})
+    return salida

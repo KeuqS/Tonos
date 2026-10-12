@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analizador musical</title>
+  <link rel="stylesheet" href="/static/estilos.css">
+</head>
+<body>
+  <header class="encabezado">
+    <h1>Analizador musical</h1>
+    <p>Subí una canción o un video y te digo el tempo, el compás, la tonalidad y los acordes.
+       Todo se procesa en tu PC: el archivo no sale de tu computadora.</p>
+  </header>
+
+  <main>
+    <section id="subida">
+      <label class="zona" id="zona">
+        <input type="file" id="archivo"
+               accept="audio/*,video/*,.mp4,.m4a,.mp3,.wav,.flac,.ogg,.opus,.aac,.webm,.mkv,.mov">
+        <span class="zona-titulo">Arrastrá un archivo acá o hacé clic para elegirlo</span>
+        <span class="zona-pista">MP4, MP3, M4A, WAV, FLAC, MKV… de hasta 20 minutos (y 1 GB)</span>
+      </label>
+    </section>
+
+    <section id="progreso" class="progreso" hidden>
+      <div class="progreso-paso" id="paso" aria-live="polite">Subiendo el archivo…</div>
+      <div class="barra" role="progressbar" aria-label="Progreso del análisis" aria-valuemin="0" aria-valuemax="100" id="barra">
+        <div class="barra-relleno" id="barra-relleno"></div>
+      </div>
+      <div class="progreso-tiempo" id="tiempo" aria-hidden="true"></div>
+    </section>
+
+    <section id="error" class="aviso-error" hidden role="alert">
+      <p id="error-texto"></p>
+      <button type="button" class="boton" id="reintentar">Probar con otro archivo</button>
+    </section>
+
+    <section id="reporte" hidden>
+      <div class="reproductor tarjeta">
+        <div class="archivo-info">
+          <strong id="nombre-archivo"></strong>
+          <span id="duracion" class="tenue"></span>
+          <span id="cache" class="tenue" hidden>· resultado guardado de un análisis anterior</span>
+        </div>
+        <audio id="audio" controls preload="metadata"></audio>
+        <p id="audio-error" class="tenue" hidden>Tu navegador no puede reproducir este formato, pero el análisis está completo.</p>
+        <div class="ahora" aria-live="off">
+          <div><span class="tenue">Ahora</span> <b id="acorde-actual">—</b></div>
+          <div><span class="tenue">Después</span> <span id="acorde-siguiente">—</span></div>
+          <div><span class="tenue">Compás</span> <span id="compas-actual">—</span></div>
+          <div class="cuenta" id="cuenta" aria-hidden="true"></div>
+        </div>
+        <div class="controles">
+          <label class="interruptor"><input type="checkbox" id="clic"> Clic en cada pulso</label>
+          <div class="segmentado" role="group" aria-label="Notación">
+            <button type="button" data-notacion="latino" aria-pressed="true">Do Re Mi</button>
+            <button type="button" data-notacion="americano" aria-pressed="false">C D E</button>
+          </div>
+          <div class="segmentado" role="group" aria-label="Detalle de los acordes">
+            <button type="button" data-detalle="simple" aria-pressed="true">Acordes simples</button>
+            <button type="button" data-detalle="completo" aria-pressed="false">Completos</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tarjetas">
+        <article class="tarjeta" id="t-tempo"></article>
+        <article class="tarjeta" id="t-compas"></article>
+        <article class="tarjeta" id="t-tonalidad"></article>
+      </div>
+
+      <article class="tarjeta">
+        <div class="titulo-fila">
+          <h2>Acordes</h2>
+          <label class="interruptor"><input type="checkbox" id="seguir" checked> Seguir la reproducción</label>
+        </div>
+        <p class="tenue" id="nota-acordes"></p>
+        <div class="chips" id="resumen-acordes"></div>
+        <h3>Compás por compás</h3>
+        <p class="tenue">Hacé clic en un compás para escucharlo desde ahí.</p>
+        <div class="grilla" id="grilla"></div>
+      </article>
+
+      <details class="tarjeta">
+        <summary><h2>¿Qué tan confiable es esto?</h2></summary>
+        <ul class="confiabilidad">
+          <li><b>Tempo y pulsos:</b> muy buenos en pop, rock y electrónica con batería. El error típico
+            es dar el doble o la mitad. En música sin batería, en vivo o con rubato, bastante peor.
+            Activá el <i>clic</i> para comprobarlo de oído.</li>
+          <li><b>Compás:</b> es lo más difícil. Se cuenta cuántos pulsos hay entre primeros tiempos, y
+            los primeros tiempos fallan más que los pulsos (más o menos 1 de cada 5). El 3/4 y el 6/8
+            no se pueden distinguir de forma automática.</li>
+          <li><b>Tonalidad:</b> en pruebas publicadas, el modelo acierta exacto entre 7 y 8 de cada
+            10 canciones. Cuando falla, casi siempre se confunde con la relativa (Do mayor ↔ La menor)
+            o con una quinta. Da una sola tonalidad por canción, y la música modal (dórica,
+            mixolidia…) se fuerza a mayor o menor.</li>
+          <li><b>Acordes:</b> alrededor de 78 % del tiempo correcto en mayor/menor, menos con séptimas
+            y acordes raros. Por eso arrancan en modo “simple”. Los bajos e inversiones fallan seguido.</li>
+          <li><b>Repertorio:</b> los modelos se entrenaron sobre todo con pop y rock en inglés.
+            Folklore, tango y otros géneros latinos pueden dar peores resultados.</li>
+        </ul>
+        <p class="tenue">Modelos: Beat This! (CPJKU, 2024), S-KEY (Deezer, 2025) y Consonance-ACE
+          (Poltronieri, Serra y Rocamora, 2025), más librosa para el tempo de control y la afinación.</p>
+      </details>
+
+      <div class="acciones">
+        <button type="button" class="boton" id="otra">Analizar otra canción</button>
+        <button type="button" class="boton secundario" id="descargar">Descargar datos (JSON)</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

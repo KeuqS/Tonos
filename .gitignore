@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# Configuración local (rutas de esta PC)
+.claude/
+# Análisis exportados y audios de prueba
+*.analisis.json
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.m4a

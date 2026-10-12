@@ -1,0 +1,139 @@
+import numpy as np
+import pytest
+
+from app.analisis import ritmo
+from tests.sintetico import FS, cancion
+
+
+def _pulsos(bpm, n):
+    return np.arange(n) * 60.0 / bpm
+
+
+def test_pulsos_por_compas():
+    pulsos = _pulsos(120, 33)
+    primeros = pulsos[1::4]  # anacrusa de un pulso, después compases de 4
+    assert ritmo.pulsos_por_compas(pulsos, primeros) == [4] * 7
+
+
+def test_compas_en_cuatro():
+    pulsos = _pulsos(120, 65)
+    resultado = ritmo.analizar_compas(pulsos, pulsos[::4], {"tipo": "binaria"}, 120)
+    assert resultado["pulsos_por_compas"] == 4
+    assert resultado["lectura"] == "4/4"
+    assert resultado["confianza"] == "alta"
+    assert resultado["avisos"] == []
+
+
+def test_compas_en_tres_avisa_de_la_ambiguedad():
+    pulsos = _pulsos(150, 61)
+    resultado = ritmo.analizar_compas(pulsos, pulsos[::3], {"tipo": "no clara"}, 150)
+    assert resultado["lectura"] == "3/4"
+    assert "6/8" in resultado["alternativa"]
+    assert any("6/8" in a for a in resultado["avisos"])
+
+
+def test_swing_rapido_se_lee_como_cuatro_con_swing():
+    pulsos = _pulsos(200, 65)
+    resultado = ritmo.analizar_compas(pulsos, pulsos[::4], {"tipo": "ternaria"}, 200)
+    assert resultado["lectura"] == "4/4 con swing"
+
+
+def test_balada_lenta_ternaria_se_lee_como_doce_octavos():
+    pulsos = _pulsos(60, 65)
+    resultado = ritmo.analizar_compas(pulsos, pulsos[::4], {"tipo": "ternaria"}, 60)
+    assert resultado["lectura"] == "12/8"
+
+
+def test_un_pulso_por_compas_no_se_informa_como_compas():
+    pulsos = _pulsos(40, 30)
+    resultado = ritmo.analizar_compas(pulsos, pulsos, {"tipo": "ternaria"}, 40)
+    assert resultado["lectura"] is None
+    assert resultado["confianza"] == "baja"
+
+
+def test_compas_mezclado_baja_la_confianza():
+    pulsos = _pulsos(120, 200)
+    primeros, i = [], 0
+    for n in [4, 3, 4, 3, 3, 4, 3, 4, 4, 3] * 4:  # 50/50
+        primeros.append(pulsos[i])
+        i += n
+    resultado = ritmo.analizar_compas(pulsos, np.array(primeros), {"tipo": "binaria"}, 120)
+    assert resultado["confianza"] == "baja"
+    assert len(resultado["avisos"]) >= 1
+
+
+def test_tempo_desde_pulsos():
+    pulsos = _pulsos(96, 100)
+    envolvente = np.zeros(4000)
+    t = ritmo.analizar_tempo(pulsos, envolvente, 22050)
+    assert abs(t["bpm"] - 96) < 0.5
+    assert t["alternativas"] == {"mitad": 48.0, "doble": 192.0}
+    assert t["estable"] and t["regularidad"] == 1.0
+
+
+@pytest.mark.parametrize("bpm", [123, 128, 133, 140, 170, 174, 180, 193.5])
+def test_tempo_sin_error_por_la_grilla_de_20_ms(bpm):
+    # Beat This! devuelve los pulsos redondeados a cuadros de 20 ms
+    pulsos = np.round(_pulsos(bpm, 200) * 50) / 50
+    t = ritmo.analizar_tempo(pulsos, np.zeros(4000), 22050)
+    assert abs(t["bpm"] - bpm) < 0.5
+    assert t["rango"][0] - 1 <= t["bpm"] <= t["rango"][1] + 1
+
+
+def test_compases_con_anacrusa():
+    pulsos = _pulsos(120, 17)
+    lista = ritmo.compases(pulsos, pulsos[1::4], duracion=9.0)
+    assert lista[0]["numero"] == 0 and lista[0]["etiqueta"] == "anacrusa"
+    assert lista[1]["numero"] == 1 and abs(lista[1]["inicio"] - 0.5) < 1e-9
+    assert lista[1]["etiqueta"] == "compás 1"
+    assert abs(lista[-1]["fin"] - 9.0) < 1e-9
+
+
+def test_intro_sin_pulsos_aparece_en_la_grilla():
+    pulsos = 20 + _pulsos(120, 40)  # la batería entra a los 20 s
+    lista = ritmo.compases(pulsos, pulsos[::4], duracion=40.0)
+    assert lista[0] == {"numero": 0, "etiqueta": "intro", "inicio": 0.0, "fin": 20.0}
+
+
+def test_sin_primeros_tiempos_se_agrupa_de_a_cuatro_pulsos():
+    pulsos = _pulsos(120, 33)
+    lista = ritmo.compases(pulsos, np.array([]), duracion=17.0)
+    assert lista[0]["etiqueta"] == "tramo 1"
+    assert abs(lista[1]["inicio"] - 2.0) < 1e-9
+
+
+def test_sin_pulsos_se_agrupa_cada_cuatro_segundos():
+    lista = ritmo.compases(np.array([]), np.array([]), duracion=10.0)
+    assert [c["inicio"] for c in lista] == [0.0, 4.0, 8.0]
+
+
+def test_compas_no_es_mas_seguro_que_el_pulso():
+    pulsos = _pulsos(120, 65)
+    resultado = ritmo.analizar_compas(pulsos, pulsos[::4], {"tipo": "binaria"}, 120, "baja")
+    assert resultado["confianza"] == "baja"
+
+
+def test_subdivision_no_clara_sin_ataques():
+    # Envolvente sin ataques entre pulsos (acordes sostenidos): no debe inventar subdivisión
+    rng = np.random.default_rng(3)
+    envolvente = 1 + 0.05 * rng.random(int(60 * 22050 / ritmo.SALTO))
+    pulsos = _pulsos(60, 55)
+    assert ritmo.analizar_subdivision(pulsos, envolvente, 22050)["tipo"] == "no clara"
+
+
+def _subdivision(sub):
+    import librosa
+
+    y = cancion(100, 4, [("C", False)], compases=16, subdivision=sub)
+    y = librosa.resample(y, orig_sr=FS, target_sr=22050)
+    pulsos = np.arange(0, 16 * 4) * 0.6
+    env = ritmo.envolvente_de_ataques(y, 22050)
+    return ritmo.analizar_subdivision(pulsos, env, 22050)["tipo"]
+
+
+def test_subdivision_binaria():
+    assert _subdivision(2) == "binaria"
+
+
+def test_subdivision_ternaria():
+    assert _subdivision(3) == "ternaria"
