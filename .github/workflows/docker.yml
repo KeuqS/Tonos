@@ -47,15 +47,33 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Analyze a file inside the container, without network
+      # The image has an audio-only ffmpeg: check it reads every common format, also in videos
+      - name: Make test files in several formats
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          mkdir media && cd media
+          # 20 s of a plucked note every half second (120 BPM)
+          ffmpeg -loglevel error -f lavfi -i 'aevalsrc=0.5*sin(2*PI*220*t)*exp(-20*mod(t\,0.5)):d=20' beat.wav
+          for name in beat.mp3 beat.m4a beat.ogg beat.opus beat.flac beat.wma beat.aiff; do
+            ffmpeg -loglevel error -i beat.wav "$name"
+          done
+          video='testsrc=size=160x120:rate=10:duration=20'
+          ffmpeg -loglevel error -f lavfi -i "$video" -i beat.wav -c:v libx264 -c:a aac -shortest video.mp4
+          ffmpeg -loglevel error -f lavfi -i "$video" -i beat.wav -c:v libvpx-vp9 -c:a libopus -shortest video.webm
+          ffmpeg -loglevel error -f lavfi -i "$video" -i beat.wav -c:v mpeg4 -c:a ac3 -shortest video.mkv
+          ls -l
+
+      - name: Read them and analyze one inside the container, without network
         run: |
           docker run --rm --network none tonos:test python -m tonos --version
-          # 20 s of a plucked note every half second (120 BPM), made with ffmpeg and read back as MP3
-          docker run --rm --network none -i tonos:test sh -s <<'EOF'
-          set -e
-          ffmpeg -loglevel error -f lavfi -i 'aevalsrc=0.5*sin(2*PI*220*t)*exp(-20*mod(t\,0.5)):d=20' /tmp/beat.mp3
-          python -m tonos /tmp/beat.mp3
-          EOF
+          docker run --rm --network none -v "$PWD/media:/media:ro" tonos:test python -c '
+          from pathlib import Path
+          from tonos.analysis.audio import read_audio
+          for path in sorted(Path("/media").iterdir()):
+              signal, sr, track = read_audio(path, Path("/tmp/audio.wav"))
+              print(f"{path.name}: {len(signal) / sr:.1f} s")
+          '
+          docker run --rm --network none -v "$PWD/media:/media:ro" tonos:test python -m tonos /media/video.mp4
 
       - name: Serve the web app
         run: |

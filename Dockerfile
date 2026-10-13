@@ -36,14 +36,40 @@ RUN pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pyto
 COPY tonos /src/tonos
 RUN cd /src && python -m tonos --preload
 
+# ---------------------------------------------------------------- ffmpeg, audio only
+# Debian's ffmpeg adds ~450 MB of video, X11 and sound-server libraries. Tonos only reads the audio
+# of a file and writes a WAV, so this build has the containers and audio decoders of the formats
+# the app accepts and nothing else (~10 MB).
+FROM base AS ffmpeg
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates gcc git make nasm pkg-config libc6-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG FFMPEG_TAG=n8.1.3
+ARG FFMPEG_COMMIT=1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7
+RUN git clone --depth 1 --branch "$FFMPEG_TAG" https://git.ffmpeg.org/ffmpeg.git /ffmpeg \
+    && test "$(git -C /ffmpeg rev-parse HEAD)" = "$FFMPEG_COMMIT"
+
+WORKDIR /ffmpeg
+RUN ./configure --prefix=/opt/ffmpeg \
+        --disable-everything --disable-autodetect --disable-doc --disable-debug --disable-network \
+        --disable-ffplay --disable-avdevice --enable-zlib \
+        --enable-protocol=file,pipe \
+        --enable-demuxer=aac,ac3,aiff,amr,ape,asf,avi,caf,dts,eac3,flac,flv,matroska,mov,mp3,mpegps,mpegts,ogg,truehd,w64,wav,wv \
+        --enable-parser=aac,aac_latm,ac3,dca,flac,mlp,mpegaudio,opus,vorbis \
+        --enable-decoder=aac,aac_latm,ac3,alac,amrnb,amrwb,ape,dca,eac3,flac,mlp,mp1,mp1float,mp2,mp2float,mp3,mp3float,opus,pcm_alaw,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le,pcm_s32be,pcm_s32le,pcm_s8,pcm_u8,truehd,vorbis,wavpack,wmalossless,wmapro,wmav1,wmav2 \
+        --enable-filter=aformat,anull,aresample,atrim \
+        --enable-encoder=pcm_s16le \
+        --enable-muxer=wav \
+    && make -j"$(nproc)" \
+    && make install \
+    && strip /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe
+
 # ---------------------------------------------------------------- the image that runs
 FROM base
 
-# ffmpeg reads the audio of every format the app accepts
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
+COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/models /opt/models
 COPY tonos /app/tonos
