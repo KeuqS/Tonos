@@ -34,10 +34,12 @@ $py = "$env:LOCALAPPDATA\tonos\venv\Scripts\python.exe"
 & $py -m pip install --group dev
 ```
 
-**macOS and Linux:** follow the manual steps in the [README](README.md#macos-and-linux), then:
+**macOS and Linux:** run `./install.sh`. It creates the environment in
+`~/.local/share/tonos/venv`; use that Python for everything below:
 
 ```bash
-pip install --group dev
+py=~/.local/share/tonos/venv/bin/python
+"$py" -m pip install --group dev
 ```
 
 `--group dev` (pip 25.1 or later) installs the development tools listed in `pyproject.toml`:

@@ -11,6 +11,9 @@ note on what to update.
 
 ### Added
 
+- `install.sh` and `tonos.sh`, the installer and the launcher for macOS and Linux, equivalent to
+  `install.ps1` and `tonos.bat`. The environment goes in `~/.local/share/tonos/venv`. A CI job
+  installs Tonos with them on Ubuntu and macOS.
 - An [online demo](https://joaquinmuzzi.github.io/Tonos/) on GitHub Pages: the same page with a
   song that is already analyzed ("Carefree" by Kevin MacLeod, CC BY 3.0), to try the player,
   the click and the grid without installing anything. See `demo/README.md`.

@@ -58,25 +58,29 @@ It takes a few minutes and uses about 1.5 GB in `%LOCALAPPDATA%\tonos\venv`.
 
 ### macOS and Linux
 
-There is no installer script yet, but the same steps work by hand (this is what the CI does on
-Linux). With Python 3.12 and ffmpeg installed:
+You need Python 3.12, [ffmpeg](https://ffmpeg.org/) and git. If one is missing, the installer
+tells you the `brew` (macOS) or `apt` (Debian, Ubuntu) command to install it. Then, in a terminal
+inside this folder:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt -c constraints.txt
-pip install --no-deps "consonance-ace @ git+https://github.com/andreamust/consonance-ACE@d17633aea4e68e616e735d09df97b97ae3428e71"
-python -m tonos --preload
+./install.sh
 ```
+
+It takes a few minutes and uses about 1.5 GB in `~/.local/share/tonos/venv`. On a Mac it needs
+Apple silicon: PyTorch has no current build for Intel Macs. Ubuntu releases newer than 24.04 do
+not package Python 3.12; the [deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa)
+has it.
+
+Running either installer again updates the environment instead of creating it from scratch.
 
 ## Usage
 
-- **Web app:** double-click `tonos.bat` (or run `python -m tonos`). The browser opens at
-  http://127.0.0.1:8765. Close the black window to stop it; if it is already running, only the
-  browser opens. You can drop a file anywhere on the page, even over a report.
-- **Command line:** `tonos.bat "C:\path\to\song.mp4"` (or `python -m tonos song.mp4`) prints a
-  text report; add `--json` for all the data. `python -m tonos --help` lists every option.
+- **Web app:** double-click `tonos.bat` on Windows, or run `./tonos.sh` on macOS and Linux. The
+  browser opens at http://127.0.0.1:8765. Close the window (or press Ctrl+C) to stop it; if it is
+  already running, only the browser opens. You can drop a file anywhere on the page, even over a
+  report.
+- **Command line:** `tonos.bat "C:\path\to\song.mp4"` or `./tonos.sh path/to/song.mp4` prints a
+  text report; add `--json` for all the data. `--help` lists every option.
 
 An analysis takes 10 to 30 seconds per song. Uploading the same file again gives the result
 instantly, because it is cached. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
@@ -118,7 +122,8 @@ The code is in [`tonos/analysis`](tonos/analysis), one module per step.
 
 ## Where it stores things
 
-- `%LOCALAPPDATA%\tonos\venv`: the Python environment (Windows installer).
+- `%LOCALAPPDATA%\tonos\venv` on Windows, `~/.local/share/tonos/venv` on macOS and Linux: the
+  Python environment the installers create.
 - `%LOCALAPPDATA%\tonos\cache` (`~/.cache/tonos/cache` on macOS and Linux): finished analyses,
   small JSON files.
 - `~/.cache/torch/hub/checkpoints/beat_this-final0.ckpt`: the beat model (77 MB).
