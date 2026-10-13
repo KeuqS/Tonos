@@ -50,8 +50,9 @@ under a different `version`.
 
 ## `tempo`
 
-When at least eight beats are available, the object contains the estimate and the following
-diagnostics:
+The object always contains `unified_beats`, which records beat corrections made while building the
+final grid. When at least eight beats are available, it also contains the tempo estimate and the
+following diagnostics:
 
 | Key | Type / unit | Nullable | Meaning |
 | --- | --- | --- | --- |
@@ -64,8 +65,8 @@ diagnostics:
 | `regularity` | number from 0 to 1 | conditional | Share of beat intervals close to the typical interval. |
 | `curve` | array of `[time, bpm]` pairs | conditional | Local BPM samples across the song. |
 | `second_method` | object | conditional | Independent onset-envelope estimate: `bpm` and `relation` (`same`, `double`, `half`, `triple`, `third`, or `null`). |
-| `unified_beats` | object | conditional | Beat-grid corrections: `removed` extra beats and `added` missing beats. |
-| `warning` | message object or `null` | no | A tempo warning, for example when the beat grid was corrected or retracked. |
+| `unified_beats` | object | no | Beat-grid corrections: `removed` extra beats and `added` missing beats. Always present, including when `bpm` is `null`. |
+| `warning` | message object or `null` | yes | A tempo warning, for example when the beat grid was corrected or retracked. |
 
 If there are too few beats, the object instead has `bpm: null` and a `reason` message; the
 estimate-only fields are omitted. Consumers should check `bpm` before reading them.
@@ -80,8 +81,8 @@ counted meter are omitted.
 | `beats_per_bar` | integer | yes | Number of beats in the chosen bar. `null` when no meter could be estimated. |
 | `time_signature` | string | yes | Display signature such as `4/4`; `null` for an unknown or unusual reading. |
 | `swing` | boolean | no | Whether a ternary subdivision is represented as swing/shuffle. |
-| `alternative` | message object or `null` | no | Alternative reading such as 12/8, an odd-meter spelling, or shuffle. |
-| `source` | `"downbeats"`, `"periodicity"`, or `null` | no | Whether the meter came from detected downbeats or harmonic repetition. |
+| `alternative` | message object or `null` | yes | Alternative reading such as 12/8, an odd-meter spelling, or shuffle. |
+| `source` | `"downbeats"`, `"periodicity"`, or `null` | yes | Whether the meter came from detected downbeats or harmonic repetition. |
 | `agreement` | number from 0 to 1 | conditional | Share of counted bars with the modal beat count. It is `0` when no bars were countable. |
 | `confidence` | `"low"`, `"medium"`, or `"high"` | no | Confidence in the meter estimate. |
 | `bars_counted` | integer | conditional | Number of complete bars used to count the meter. |
@@ -90,6 +91,7 @@ counted meter are omitted.
 | `subdivision` | object | no | `kind` is `binary`, `ternary`, or `unclear`; `ratio` is the ternary/binary onset-strength ratio, or `null`. |
 | `second_method` | object or `null` | yes | Harmonic-periodicity comparison. It can contain `beats`, `scores`, `confirms`, `replaces`, `contradicts`, and `strong`. |
 | `warnings` | array of message objects | no | Meter warnings, including inconsistent bars or an approximate grid. |
+| `approximate_grid` | boolean | conditional | Whether bar starts are approximate because harmonic periodicity could not determine an exact phase. Present when the meter source is `"periodicity"`. |
 | `regrouped_bars` | integer | conditional | Number of bars repaired after regularizing detected downbeats. Present for downbeat-based meter. |
 
 ## `key`
@@ -110,7 +112,7 @@ counted meter are omitted.
 | Key | Type / unit | Nullable | Meaning |
 | --- | --- | --- | --- |
 | `cents` | integer (cents) | no | Deviation from A = 440 Hz; positive is sharp and negative is flat. |
-| `warning` | message object or `null` | no | Warning when the deviation is large enough that key/chord names may be a semitone off. |
+| `warning` | message object or `null` | yes | Warning when the deviation is large enough that key/chord names may be a semitone off. |
 
 ## `chords`
 
