@@ -1,0 +1,70 @@
+name: Install
+
+# Runs install.sh from scratch on Linux and macOS, as a user would, when it or what it installs changes
+on:
+  pull_request:
+    paths:
+      - "install.sh"
+      - "tonos.sh"
+      - "requirements.txt"
+      - "constraints.txt"
+      - ".github/workflows/install.yml"
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "tonos.sh"
+      - "requirements.txt"
+      - "constraints.txt"
+      - ".github/workflows/install.yml"
+  workflow_dispatch:
+
+# The workflow only needs to read the repository
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous run
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the scripts with shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh tonos.sh
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install Tonos
+        run: ./install.sh
+
+      - name: Install again (it must only update what is there)
+        run: ./install.sh
+
+      - name: Run Tonos
+        run: |
+          ~/.local/share/tonos/venv/bin/python -m tonos --version
+          ./tonos.sh --version
