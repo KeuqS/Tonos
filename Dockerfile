@@ -26,9 +26,9 @@ RUN pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pyto
     && pip install -r /src/requirements.txt -c /src/constraints.txt \
     && pip install --no-deps \
         "consonance-ace @ git+https://github.com/andreamust/consonance-ACE@d17633aea4e68e616e735d09df97b97ae3428e71" \
-    # Not needed to run the app: the test runner, the libraries' own test suites, the C++ headers
-    # of PyTorch and pip itself
-    && find /opt/venv -depth -type d -name tests -exec rm -rf {} + \
+    # Not needed to run the app: the test runner, the libraries' own test suites (except numpy's,
+    # which numpy imports), the C++ headers of PyTorch and pip itself
+    && find /opt/venv -path "*/site-packages/numpy" -prune -o -type d -name tests -prune -exec rm -rf {} + \
     && rm -rf /opt/venv/lib/python3.12/site-packages/torch/include \
     && pip uninstall -y pytest pip
 
