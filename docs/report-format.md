@@ -197,7 +197,7 @@ segments = report["chords"]["segments"]
 
 for bar in report["bars"]:
     names = [segments[index]["letter"] for index in bar["chords"]]
-    print(f'{bar["number"]:>3}: {" ".join(names) or "—"}')
+    print(f"{bar['number']:>3}: {' '.join(names) or '—'}")
 ```
 
 This also works with a file produced by `tonos --json`; the checked-in demo is used here so the
